@@ -27,11 +27,22 @@
   }
   header .logo { font-weight: 800; font-size: 18px; letter-spacing: .5px; white-space: nowrap; }
   header .logo span { color: #e63329; }
-  #playerSelect {
-    flex: 1; min-width: 0;
+  #accountBox { flex: 1; min-width: 0; display: flex; justify-content: flex-end; }
+  #loginForm { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  #loginForm input {
     background: #171d3d; color: #fff; border: 1px solid #39406e;
-    border-radius: 10px; padding: 9px 8px; font-size: 15px;
+    border-radius: 10px; padding: 9px 8px; font-size: 14.5px; min-width: 0;
   }
+  #loginName { width: 110px; }
+  #loginPass { width: 100px; }
+  #loginBtn, #logoutBtn {
+    background: #2456c8; color: #fff; border: none; border-radius: 10px;
+    padding: 9px 14px; font-size: 14.5px; font-weight: 800; cursor: pointer; white-space: nowrap;
+  }
+  #logoutBtn { background: #3a4066; }
+  #loggedInBox { display: flex; gap: 8px; align-items: center; }
+  #whoAmI { font-weight: 800; font-size: 15px; white-space: nowrap; }
+  .hidden { display: none !important; }
   .balance {
     background: #171d3d; border: 1px solid #39406e; border-radius: 10px;
     padding: 8px 12px; font-weight: 700; font-size: 15px; white-space: nowrap;
@@ -128,7 +139,17 @@
 
 <header>
   <div class="logo">SKY<span>CRASH</span> ✈️</div>
-  <select id="playerSelect"><option value="">— pick your name —</option></select>
+  <div id="accountBox">
+    <div id="loginForm">
+      <input id="loginName" type="text" placeholder="Your name" autocomplete="username">
+      <input id="loginPass" type="password" placeholder="Password" autocomplete="current-password">
+      <button id="loginBtn">Log in</button>
+    </div>
+    <div id="loggedInBox" class="hidden">
+      <span id="whoAmI"></span>
+      <button id="logoutBtn">Log out</button>
+    </div>
+  </div>
   <div class="balance">⭐ <b id="balanceVal">0</b> pts</div>
 </header>
 
@@ -151,7 +172,7 @@
     <button class="chip" data-amt="100">100</button>
     <button class="chip" data-amt="500">500</button>
   </div>
-  <button id="actionBtn" disabled>Pick your name to play</button>
+  <button id="actionBtn" disabled>Log in to play</button>
   <div id="msg"></div>
 </div>
 
@@ -162,7 +183,7 @@
 
 <footer>
   🎉 Fun points only — no real money, just bragging rights.<br>
-  New player? Ask the boss (admin) to create your name and load your points.
+  No account? Ask the boss (admin) — he creates your name and password and loads your points.
 </footer>
 
 <script>
@@ -177,7 +198,11 @@
   var phaseEl = document.getElementById('phaseLabel');
   var historyEl = document.getElementById('history');
   var feedEl = document.getElementById('feed');
-  var selectEl = document.getElementById('playerSelect');
+  var loginFormEl = document.getElementById('loginForm');
+  var loggedInBoxEl = document.getElementById('loggedInBox');
+  var loginNameEl = document.getElementById('loginName');
+  var loginPassEl = document.getElementById('loginPass');
+  var whoAmIEl = document.getElementById('whoAmI');
   var balanceEl = document.getElementById('balanceVal');
   var amountEl = document.getElementById('betAmount');
   var actionBtn = document.getElementById('actionBtn');
@@ -185,7 +210,8 @@
   var cdWrap = document.getElementById('countdownWrap');
   var cdBar = document.getElementById('countdownBar');
 
-  var myId = Number(localStorage.getItem('skycrashPlayerId') || 0) || null;
+  var myToken = localStorage.getItem('skycrashToken') || null;
+  var myId = null; // set from state.me on every poll
   var state = null;
   var displayMult = 1.0;
   var lastFrameAt = performance.now();
@@ -350,17 +376,16 @@
   function render() {
     if (!state) return;
 
-    // player dropdown (preserve selection)
-    var current = selectEl.value;
-    var html = '<option value="">— pick your name —</option>';
-    state.players.forEach(function (p) {
-      html += '<option value="' + p.id + '"' + (p.id === myId ? ' selected' : '') + '>' +
-        p.name.replace(/</g, '&lt;') + ' — ' + fmt(p.points) + ' pts</option>';
-    });
-    if (selectEl.innerHTML !== html) selectEl.innerHTML = html;
-    if (current && Number(current) !== myId) selectEl.value = current;
-
+    // account box: login form vs "logged in as …"
     var me = myPlayer();
+    if (state.me) {
+      loginFormEl.classList.add('hidden');
+      loggedInBoxEl.classList.remove('hidden');
+      whoAmIEl.textContent = '👤 ' + state.me.name;
+    } else {
+      loginFormEl.classList.remove('hidden');
+      loggedInBoxEl.classList.add('hidden');
+    }
     balanceEl.textContent = me ? fmt(me.points) : '0';
 
     // history pills
@@ -402,7 +427,7 @@
     actionBtn.className = '';
     if (!myId || !me) {
       actionBtn.disabled = true;
-      actionBtn.textContent = state.players.length ? '👆 Pick your name to play' : 'Ask the admin to create players';
+      actionBtn.textContent = state.players.length ? '🔐 Log in to play' : 'Ask the admin to create your account';
     } else if (state.phase === 'betting') {
       if (bet) {
         actionBtn.disabled = true;
@@ -454,12 +479,24 @@
   }
 
   /* ---------------- polling ---------------- */
+  function authHeaders() {
+    var h = { 'Content-Type': 'application/json' };
+    if (myToken) h['X-Session'] = myToken;
+    return h;
+  }
+
   var prevPhase = null;
   function poll() {
-    fetch('/api/state')
+    fetch('/api/state', { headers: authHeaders() })
       .then(function (r) { return r.json(); })
       .then(function (s) {
         state = s;
+        myId = s.me ? s.me.id : null;
+        if (myToken && !s.me) {
+          // session expired, password changed, or account deleted
+          myToken = null;
+          localStorage.removeItem('skycrashToken');
+        }
         if (s.phase === 'crashed' && prevPhase === 'flying') {
           flyawayUntil = performance.now() + 900;
         }
@@ -477,11 +514,35 @@
   requestAnimationFrame(frame);
 
   /* ---------------- events ---------------- */
-  selectEl.addEventListener('change', function () {
-    myId = Number(selectEl.value) || null;
-    if (myId) localStorage.setItem('skycrashPlayerId', String(myId));
-    else localStorage.removeItem('skycrashPlayerId');
-    render();
+  document.getElementById('loginBtn').addEventListener('click', function () {
+    var name = loginNameEl.value.trim();
+    var pass = loginPassEl.value;
+    if (!name || !pass) { showMsg('Type your name and password first.'); return; }
+    fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, password: pass })
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) { showMsg('⚠️ ' + (res.j.error || 'Login failed')); return; }
+        myToken = res.j.token;
+        localStorage.setItem('skycrashToken', myToken);
+        loginPassEl.value = '';
+        showMsg('✅ Welcome, ' + res.j.player.name + '!');
+        poll();
+      })
+      .catch(function () { showMsg('⚠️ Connection problem — try again'); });
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', function () {
+    fetch('/api/logout', { method: 'POST', headers: authHeaders(), body: '{}' })
+      .catch(function () { /* ignore — we clear locally anyway */ })
+      .then(function () {
+        myToken = null;
+        myId = null;
+        localStorage.removeItem('skycrashToken');
+        showMsg('👋 Logged out.');
+        poll();
+      });
   });
 
   document.querySelectorAll('.chip').forEach(function (chip) {
@@ -497,8 +558,8 @@
     if (state.phase === 'betting' && !bet) {
       var amount = parseInt(amountEl.value, 10);
       fetch('/api/bet', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId: myId, amount: amount })
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ amount: amount })
       }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
           busy = false;
@@ -508,8 +569,8 @@
         .catch(function () { busy = false; showMsg('⚠️ Connection problem — try again'); });
     } else if (state.phase === 'flying' && bet && bet.cashedAt === null) {
       fetch('/api/cashout', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId: myId })
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({})
       }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
           busy = false;
