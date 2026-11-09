@@ -200,8 +200,8 @@ const FEED_LEN = 30;
 
 function generateCrashPoint() {
   const r = Math.random();
-  if (r < 0.03) return 1.0; // ~3% instant bust at 1.00x
-  const m = Math.floor((0.99 / (1 - r)) * 100) / 100;
+  if (r < 0.05) return 1.0; // ~5% instant bust at 1.00x
+  const m = Math.floor((0.94 / (1 - r)) * 100) / 100;
   return Math.min(MAX_CRASH, Math.max(1.0, m));
 }
 
