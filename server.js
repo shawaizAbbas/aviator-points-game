@@ -7,6 +7,7 @@
  */
 
 const express = require('express');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -16,13 +17,14 @@ const DATA_FILE = path.join(__dirname, 'data.json');
 
 /* ---------------- persistence (JSON file, atomic writes) ---------------- */
 
-let db = { players: [], nextId: 1 };
+let db = { players: [], nextId: 1, sessions: {} };
 
 function loadDb() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
       if (parsed && Array.isArray(parsed.players) && typeof parsed.nextId === 'number') {
+        if (!parsed.sessions || typeof parsed.sessions !== 'object') parsed.sessions = {};
         db = parsed;
       }
     }
@@ -42,6 +44,47 @@ saveDb(); // make sure data.json exists from the start
 
 function findPlayer(id) {
   return db.players.find((p) => p.id === Number(id));
+}
+
+/* ---------------- player passwords & sessions ---------------- */
+
+function hashPassword(password, salt) {
+  return crypto.scryptSync(String(password), salt, 32).toString('hex');
+}
+
+function setPlayerPassword(player, password) {
+  player.passSalt = crypto.randomBytes(16).toString('hex');
+  player.passHash = hashPassword(password, player.passSalt);
+}
+
+function checkPassword(player, password) {
+  if (!player || !player.passHash || !player.passSalt) return false;
+  const h = hashPassword(password, player.passSalt);
+  try {
+    return crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(player.passHash, 'hex'));
+  } catch (err) {
+    return false;
+  }
+}
+
+function createSession(playerId) {
+  const token = crypto.randomBytes(24).toString('hex');
+  db.sessions[token] = playerId;
+  saveDb();
+  return token;
+}
+
+// The logged-in player for a request, from the X-Session header (or body.session).
+function authPlayer(req) {
+  const token = req.headers['x-session'] || (req.body && req.body.session);
+  if (!token || typeof token !== 'string') return null;
+  const pid = db.sessions[token];
+  if (!pid) return null;
+  return findPlayer(pid) || null;
+}
+
+function publicPlayer(p) {
+  return { id: p.id, name: p.name, points: p.points };
 }
 
 /* ---------------- game engine ---------------- */
@@ -146,13 +189,38 @@ function publicState() {
 }
 
 app.get('/api/state', (req, res) => {
-  res.json(publicState());
+  const s = publicState();
+  const me = authPlayer(req);
+  s.me = me ? publicPlayer(me) : null;
+  res.json(s);
+});
+
+/* ---------------- player login ---------------- */
+
+app.post('/api/login', (req, res) => {
+  const { name, password } = req.body || {};
+  const cleanName = typeof name === 'string' ? name.trim().toLowerCase() : '';
+  const player = db.players.find((p) => p.name.toLowerCase() === cleanName);
+  if (!player || !checkPassword(player, password || '')) {
+    return res.status(401).json({ error: 'Wrong name or password' });
+  }
+  const token = createSession(player.id);
+  res.json({ ok: true, token, player: publicPlayer(player) });
+});
+
+app.post('/api/logout', (req, res) => {
+  const token = req.headers['x-session'] || (req.body && req.body.session);
+  if (token && db.sessions[token]) {
+    delete db.sessions[token];
+    saveDb();
+  }
+  res.json({ ok: true });
 });
 
 app.post('/api/bet', (req, res) => {
-  const { playerId, amount } = req.body || {};
-  const player = findPlayer(playerId);
-  if (!player) return res.status(404).json({ error: 'Player not found' });
+  const { amount } = req.body || {};
+  const player = authPlayer(req);
+  if (!player) return res.status(401).json({ error: 'Please log in first' });
   if (game.phase !== 'betting') return res.status(400).json({ error: 'Betting window is closed' });
   if (!Number.isInteger(amount) || amount <= 0) {
     return res.status(400).json({ error: 'Amount must be a positive whole number' });
@@ -169,9 +237,8 @@ app.post('/api/bet', (req, res) => {
 });
 
 app.post('/api/cashout', (req, res) => {
-  const { playerId } = req.body || {};
-  const player = findPlayer(playerId);
-  if (!player) return res.status(404).json({ error: 'Player not found' });
+  const player = authPlayer(req);
+  if (!player) return res.status(401).json({ error: 'Please log in first' });
   if (game.phase !== 'flying') return res.status(400).json({ error: 'Plane is not flying' });
   const bet = game.bets.get(player.id);
   if (!bet) return res.status(400).json({ error: 'No active bet this round' });
@@ -199,22 +266,49 @@ function requirePin(req, res, next) {
 }
 
 app.get('/api/admin/players', requirePin, (req, res) => {
-  res.json({ players: db.players });
+  res.json({
+    players: db.players.map((p) => ({
+      id: p.id, name: p.name, points: p.points, hasPassword: !!p.passHash,
+    })),
+  });
 });
 
 app.post('/api/admin/players', requirePin, (req, res) => {
-  const { name, startingPoints } = req.body || {};
+  const { name, startingPoints, password } = req.body || {};
   const cleanName = typeof name === 'string' ? name.trim() : '';
   if (!cleanName) return res.status(400).json({ error: 'Name is required' });
   if (cleanName.length > 24) return res.status(400).json({ error: 'Name too long (max 24 chars)' });
+  if (db.players.some((p) => p.name.toLowerCase() === cleanName.toLowerCase())) {
+    return res.status(400).json({ error: 'That name is already used — pick another' });
+  }
+  if (typeof password !== 'string' || password.length < 4) {
+    return res.status(400).json({ error: 'Password must be at least 4 characters' });
+  }
   const start = startingPoints === undefined ? 1000 : startingPoints;
   if (!Number.isInteger(start) || start < 0) {
     return res.status(400).json({ error: 'Starting points must be a whole number >= 0' });
   }
   const player = { id: db.nextId++, name: cleanName, points: start };
+  setPlayerPassword(player, password);
   db.players.push(player);
   saveDb();
-  res.json({ ok: true, player });
+  res.json({ ok: true, player: publicPlayer(player) });
+});
+
+app.post('/api/admin/setpassword', requirePin, (req, res) => {
+  const { playerId, password } = req.body || {};
+  const player = findPlayer(playerId);
+  if (!player) return res.status(404).json({ error: 'Player not found' });
+  if (typeof password !== 'string' || password.length < 4) {
+    return res.status(400).json({ error: 'Password must be at least 4 characters' });
+  }
+  setPlayerPassword(player, password);
+  // log the player out everywhere so only the new password works from now on
+  Object.keys(db.sessions).forEach((t) => {
+    if (db.sessions[t] === player.id) delete db.sessions[t];
+  });
+  saveDb();
+  res.json({ ok: true, player: publicPlayer(player) });
 });
 
 app.post('/api/admin/add', requirePin, (req, res) => {
@@ -226,7 +320,7 @@ app.post('/api/admin/add', requirePin, (req, res) => {
   }
   player.points += amount;
   saveDb();
-  res.json({ ok: true, player });
+  res.json({ ok: true, player: publicPlayer(player) });
 });
 
 app.post('/api/admin/remove', requirePin, (req, res) => {
@@ -238,7 +332,7 @@ app.post('/api/admin/remove', requirePin, (req, res) => {
   }
   player.points = Math.max(0, player.points - amount);
   saveDb();
-  res.json({ ok: true, player });
+  res.json({ ok: true, player: publicPlayer(player) });
 });
 
 app.post('/api/admin/delete', requirePin, (req, res) => {
@@ -247,8 +341,11 @@ app.post('/api/admin/delete', requirePin, (req, res) => {
   if (idx === -1) return res.status(404).json({ error: 'Player not found' });
   const [removed] = db.players.splice(idx, 1);
   game.bets.delete(removed.id);
+  Object.keys(db.sessions).forEach((t) => {
+    if (db.sessions[t] === removed.id) delete db.sessions[t];
+  });
   saveDb();
-  res.json({ ok: true, removed });
+  res.json({ ok: true, removed: publicPlayer(removed) });
 });
 
 app.listen(PORT, () => {
