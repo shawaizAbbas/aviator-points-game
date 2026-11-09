@@ -511,11 +511,12 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
   function fakeTarget() {
-    var r = Math.random();
-    if (r < 0.30) return 1.15 + Math.random() * 0.7;  // nervous: out early
-    if (r < 0.62) return 1.9 + Math.random() * 1.1;   // classic ~2x
-    if (r < 0.85) return 3 + Math.random() * 3;       // greedy
-    return 6 + Math.random() * 14;                    // moon chasers
+     var r = Math.random();
+     if (r < 0.28) return 1.15 + Math.random() * 0.7;  // nervous: out early
+     if (r < 0.58) return 1.9 + Math.random() * 1.1;   // classic ~2x
+     if (r < 0.81) return 3 + Math.random() * 3;       // greedy
+     if (r < 0.93) return 6 + Math.random() * 14;      // high chasers
+     return 25 + Math.random() * 275;                  // diamond hands: holds for the moon
   }
   function fakeAmount() {
     var tiers = [10, 20, 25, 50, 50, 50, 100, 100, 150, 200, 250, 300, 500, 750, 1000];
