@@ -194,7 +194,7 @@ function publicPlayer(p) {
 const BET_WINDOW_MS = 6000;   // time to place bets before take-off
 const CRASH_PAUSE_MS = 3500;  // pause after a crash before the next round
 const GROWTH_RATE = 0.13;     // multiplier = e^(GROWTH_RATE * seconds)
-const MAX_CRASH = 100;        // crash point cap
+const MAX_CRASH = 500;        // crash point cap — rare moon flights reach 100–500x
 const HISTORY_LEN = 15;
 const FEED_LEN = 30;
 
