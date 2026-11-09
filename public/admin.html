@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sky Crash — Admin (Boss Panel)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #070b1d; color: #fff; min-height: 100vh; padding: 16px;
+    max-width: 640px; margin: 0 auto;
+  }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  h1 span { color: #e63329; }
+  .sub { color: #7c86b8; font-size: 13.5px; margin-bottom: 18px; }
+  .card {
+    background: #10142e; border: 1px solid #232a4d; border-radius: 14px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 1px; color: #9fb2ff; margin-bottom: 12px; }
+  label { display: block; font-size: 13px; color: #9aa3c7; margin: 10px 0 5px; }
+  input, select {
+    width: 100%; background: #171d3d; border: 1px solid #39406e; color: #fff;
+    border-radius: 10px; padding: 12px; font-size: 16px;
+  }
+  button {
+    border: none; border-radius: 10px; cursor: pointer; font-weight: 800;
+    padding: 11px 14px; font-size: 14.5px; color: #fff; background: #2e8b3a;
+  }
+  button:active { filter: brightness(1.2); }
+  button.blue { background: #2456c8; }
+  button.red { background: #b03024; }
+  button.grey { background: #3a4066; }
+  button.gold { background: #a87b00; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .player { border-top: 1px solid #232a4d; padding: 14px 0; }
+  .player:first-of-type { border-top: none; }
+  .player .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 9px; }
+  .player .name { font-size: 17px; font-weight: 800; }
+  .player .pts { font-size: 16px; font-weight: 800; color: #ffc531; white-space: nowrap; }
+  .player .row button { flex: 1; min-width: 64px; }
+  .player .custom { display: flex; gap: 8px; margin-top: 8px; }
+  .player .custom input { flex: 1; padding: 9px; font-size: 15px; }
+  .player .custom button { flex: 0 0 auto; }
+  #msg { min-height: 22px; font-size: 14.5px; font-weight: 600; margin-bottom: 10px; }
+  #msg.ok { color: #7be495; }
+  #msg.err { color: #ff8d85; }
+  .hidden { display: none; }
+  footer { text-align: center; color: #5f6aa0; font-size: 12.5px; padding: 8px 0 22px; }
+</style>
+</head>
+<body>
+
+<h1>SKY<span>CRASH</span> — Boss Panel 🎛️</h1>
+<p class="sub">You control the players and the fun points. Nobody plays until you create them here.</p>
+
+<div id="msg"></div>
+
+<!-- PIN gate -->
+<div class="card" id="pinCard">
+  <h2>🔐 Admin PIN</h2>
+  <label for="pinInput">Enter the admin PIN to unlock</label>
+  <input id="pinInput" type="password" inputmode="numeric" placeholder="PIN">
+  <div class="row" style="margin-top:12px;">
+    <button class="blue" id="unlockBtn" style="flex:1;">Unlock</button>
+  </div>
+</div>
+
+<!-- create player -->
+<div class="card hidden" id="createCard">
+  <h2>➕ Create player</h2>
+  <label for="newName">Player name</label>
+  <input id="newName" type="text" maxlength="24" placeholder="e.g. Ali">
+  <label for="newPoints">Starting fun points</label>
+  <input id="newPoints" type="number" inputmode="numeric" min="0" step="1" value="1000">
+  <div class="row" style="margin-top:12px;">
+    <button id="createBtn" style="flex:1;">Create player</button>
+  </div>
+</div>
+
+<!-- add points (separate admin option) -->
+<div class="card hidden" id="addCard">
+  <h2>⭐ Add points</h2>
+  <label for="addPlayer">Player</label>
+  <select id="addPlayer"></select>
+  <label for="addAmount">Points to add</label>
+  <input id="addAmount" type="number" inputmode="numeric" min="1" step="1" value="500">
+  <div class="row" style="margin-top:12px;">
+    <button class="gold" data-quickadd="100">+100</button>
+    <button class="gold" data-quickadd="500">+500</button>
+    <button class="gold" data-quickadd="1000">+1000</button>
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <button class="blue" id="addBtn" style="flex:1;">Add points</button>
+  </div>
+</div>
+
+<!-- players -->
+<div class="card hidden" id="playersCard">
+  <h2>👥 Players</h2>
+  <div id="playerList"></div>
+  <div class="row" style="margin-top:10px;">
+    <button class="grey" id="refreshBtn" style="flex:1;">↻ Refresh</button>
+    <button class="grey" id="lockBtn" style="flex:1;">🔒 Lock panel</button>
+  </div>
+</div>
+
+<footer>🎉 Fun points only — no real money.<br>The PIN is set by the ADMIN_PIN setting on Render (default 1234 — change it!).</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var pin = sessionStorage.getItem('skycrashAdminPin') || '';
+  var pinCard = document.getElementById('pinCard');
+  var createCard = document.getElementById('createCard');
+  var addCard = document.getElementById('addCard');
+  var playersCard = document.getElementById('playersCard');
+  var listEl = document.getElementById('playerList');
+  var msgEl = document.getElementById('msg');
+
+  function showMsg(text, ok) {
+    msgEl.textContent = text || '';
+    msgEl.className = ok === true ? 'ok' : (ok === false ? 'err' : '');
+  }
+  function fmt(n) { return Number(n).toLocaleString('en-US'); }
+  function esc(s) { return String(s).replace(/</g, '&lt;'); }
+
+  function api(path, body) {
+    var opts = { headers: { 'Content-Type': 'application/json', 'X-Admin-Pin': pin } };
+    if (body !== undefined) { opts.method = 'POST'; opts.body = JSON.stringify(body); }
+    return fetch(path, opts).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; });
+    });
+  }
+
+  function setLocked(locked) {
+    pinCard.classList.toggle('hidden', !locked);
+    createCard.classList.toggle('hidden', locked);
+    addCard.classList.toggle('hidden', locked);
+    playersCard.classList.toggle('hidden', locked);
+  }
+
+  function renderPlayers(players) {
+    // keep the Add-points dropdown in sync (preserve current selection)
+    var addSel = document.getElementById('addPlayer');
+    var prevSel = addSel.value;
+    addSel.innerHTML = players.map(function (p) {
+      return '<option value="' + p.id + '">' + esc(p.name) + ' — ' + fmt(p.points) + ' pts</option>';
+    }).join('');
+    if (prevSel && players.some(function (p) { return String(p.id) === prevSel; })) addSel.value = prevSel;
+
+    if (!players.length) {
+      listEl.innerHTML = '<p style="color:#7c86b8;font-size:14.5px;">No players yet — create the first one above.</p>';
+      return;
+    }
+    listEl.innerHTML = players.map(function (p) {
+      return '<div class="player" data-id="' + p.id + '">' +
+        '<div class="head"><span class="name">' + esc(p.name) + '</span>' +
+        '<span class="pts">⭐ ' + fmt(p.points) + ' pts</span></div>' +
+        '<div class="custom">' +
+          '<input type="number" inputmode="numeric" min="1" step="1" placeholder="Amount" class="customAmt">' +
+          '<button class="grey" data-act="removeCustom">Remove</button>' +
+          '<button class="red" data-act="del">🗑 Delete</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function loadPlayers() {
+    return api('/api/admin/players').then(function (res) {
+      if (res.status === 401) {
+        setLocked(true);
+        showMsg('🔐 Wrong PIN — panel locked.', false);
+        sessionStorage.removeItem('skycrashAdminPin');
+        pin = '';
+        return false;
+      }
+      if (!res.ok) { showMsg('⚠️ ' + (res.j.error || 'Could not load players'), false); return false; }
+      renderPlayers(res.j.players);
+      return true;
+    }).catch(function () { showMsg('⚠️ Connection problem', false); return false; });
+  }
+
+  document.getElementById('unlockBtn').addEventListener('click', function () {
+    pin = document.getElementById('pinInput').value.trim();
+    if (!pin) { showMsg('Type the PIN first.', false); return; }
+    sessionStorage.setItem('skycrashAdminPin', pin);
+    loadPlayers().then(function (ok) {
+      if (ok) { setLocked(false); showMsg('✅ Panel unlocked. You are the boss. 😎', true); }
+    });
+  });
+
+  document.getElementById('lockBtn').addEventListener('click', function () {
+    pin = '';
+    sessionStorage.removeItem('skycrashAdminPin');
+    setLocked(true);
+    showMsg('🔒 Panel locked.', true);
+  });
+
+  document.getElementById('refreshBtn').addEventListener('click', function () {
+    loadPlayers().then(function (ok) { if (ok) showMsg('↻ Refreshed.', true); });
+  });
+
+  document.getElementById('createBtn').addEventListener('click', function () {
+    var name = document.getElementById('newName').value.trim();
+    var points = parseInt(document.getElementById('newPoints').value, 10);
+    if (!name) { showMsg('Give the player a name first.', false); return; }
+    api('/api/admin/players', { name: name, startingPoints: isNaN(points) ? 1000 : points })
+      .then(function (res) {
+        if (!res.ok) { showMsg('⚠️ ' + (res.j.error || 'Could not create player'), false); return; }
+        document.getElementById('newName').value = '';
+        showMsg('✅ Player "' + res.j.player.name + '" created with ' + fmt(res.j.player.points) + ' pts.', true);
+        loadPlayers();
+      })
+      .catch(function () { showMsg('⚠️ Connection problem', false); });
+  });
+
+  // ---- separate Add points card ----
+  addCard.querySelectorAll('[data-quickadd]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.getElementById('addAmount').value = b.getAttribute('data-quickadd');
+    });
+  });
+
+  document.getElementById('addBtn').addEventListener('click', function () {
+    var sel = document.getElementById('addPlayer');
+    var playerId = Number(sel.value);
+    var amt = parseInt(document.getElementById('addAmount').value, 10);
+    if (!playerId) { showMsg('Create a player first, then add points.', false); return; }
+    if (!amt || amt <= 0) { showMsg('Type how many points to add.', false); return; }
+    api('/api/admin/add', { playerId: playerId, amount: amt })
+      .then(function (res) {
+        if (!res.ok) { showMsg('⚠️ ' + (res.j.error || 'Failed'), false); return; }
+        showMsg('✅ Added ' + fmt(amt) + ' pts — ' + res.j.player.name + ' now has ' + fmt(res.j.player.points) + ' pts.', true);
+        loadPlayers();
+      })
+      .catch(function () { showMsg('⚠️ Connection problem', false); });
+  });
+
+  listEl.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('button');
+    if (!btn) return;
+    var wrap = btn.closest('.player');
+    var playerId = Number(wrap.getAttribute('data-id'));
+    var act = btn.getAttribute('data-act');
+
+    if (act === 'removeCustom') {
+      var amt = parseInt(wrap.querySelector('.customAmt').value, 10);
+      if (!amt || amt <= 0) { showMsg('Type an amount first.', false); return; }
+      api('/api/admin/remove', { playerId: playerId, amount: amt })
+        .then(function (res) {
+          if (!res.ok) { showMsg('⚠️ ' + (res.j.error || 'Failed'), false); return; }
+          showMsg('✅ ' + res.j.player.name + ' now has ' + fmt(res.j.player.points) + ' pts.', true);
+          loadPlayers();
+        });
+    } else if (act === 'del') {
+      var name = wrap.querySelector('.name').textContent;
+      if (!confirm('Delete player "' + name + '" and all their points?')) return;
+      api('/api/admin/delete', { playerId: playerId })
+        .then(function (res) {
+          if (!res.ok) { showMsg('⚠️ ' + (res.j.error || 'Failed'), false); return; }
+          showMsg('🗑 Player "' + name + '" deleted.', true);
+          loadPlayers();
+        });
+    }
+  });
+
+  // auto-unlock if we already have a PIN this session
+  if (pin) {
+    loadPlayers().then(function (ok) { if (ok) setLocked(false); });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sky Crash — Fun Points Game</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #070b1d;
+    color: #fff;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  /* ---------- top bar ---------- */
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: rgba(10, 14, 34, .92);
+    border-bottom: 1px solid #232a4d;
+    position: sticky; top: 0; z-index: 20;
+  }
+  header .logo { font-weight: 800; font-size: 18px; letter-spacing: .5px; white-space: nowrap; }
+  header .logo span { color: #e63329; }
+  #playerSelect {
+    flex: 1; min-width: 0;
+    background: #171d3d; color: #fff; border: 1px solid #39406e;
+    border-radius: 10px; padding: 9px 8px; font-size: 15px;
+  }
+  .balance {
+    background: #171d3d; border: 1px solid #39406e; border-radius: 10px;
+    padding: 8px 12px; font-weight: 700; font-size: 15px; white-space: nowrap;
+  }
+  .balance b { color: #ffc531; }
+
+  /* ---------- history pills ---------- */
+  #history {
+    display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto;
+    background: #0a0e24; scrollbar-width: none;
+  }
+  #history::-webkit-scrollbar { display: none; }
+  .pill {
+    flex: 0 0 auto; font-size: 12px; font-weight: 700;
+    padding: 4px 10px; border-radius: 999px; background: #1b2145; color: #9fb2ff;
+    border: 1px solid #2c3468;
+  }
+  .pill.hot { color: #ffb3ae; border-color: #6e2c2c; background: #33161a; }
+  .pill.big { color: #ffe9a8; border-color: #6e5a2c; background: #33290f; }
+  #history .empty { font-size: 12px; color: #5f6aa0; }
+
+  /* ---------- stage ---------- */
+  #stage { position: relative; width: 100%; background: #070b1d; }
+  #sky { display: block; width: 100%; height: 46vh; min-height: 260px; }
+  #multiplier {
+    position: absolute; top: 12%; left: 0; right: 0;
+    text-align: center; font-size: clamp(44px, 13vw, 84px); font-weight: 900;
+    text-shadow: 0 4px 24px rgba(0,0,0,.65); pointer-events: none;
+    font-variant-numeric: tabular-nums;
+  }
+  #multiplier.crashed { color: #ff5147; }
+  #phaseLabel {
+    position: absolute; top: calc(12% + clamp(58px, 16vw, 104px)); left: 0; right: 0;
+    text-align: center; font-size: clamp(14px, 4.4vw, 20px); font-weight: 700;
+    color: #cdd6ff; text-shadow: 0 2px 10px rgba(0,0,0,.7); pointer-events: none;
+  }
+  #countdownWrap {
+    position: absolute; left: 10%; right: 10%; bottom: 12px; height: 8px;
+    background: rgba(255,255,255,.14); border-radius: 99px; overflow: hidden; display: none;
+  }
+  #countdownBar { height: 100%; width: 100%; background: #ffc531; border-radius: 99px; }
+
+  /* ---------- controls ---------- */
+  #controls { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .betRow { display: flex; gap: 8px; }
+  #betAmount {
+    flex: 1; min-width: 0; background: #171d3d; border: 1px solid #39406e; color: #fff;
+    border-radius: 12px; padding: 13px; font-size: 18px; font-weight: 700; text-align: center;
+  }
+  .chips { display: flex; gap: 8px; }
+  .chip {
+    flex: 1; background: #1b2145; color: #cdd6ff; border: 1px solid #39406e;
+    border-radius: 999px; padding: 9px 0; font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  .chip:active { background: #2a3163; }
+  #actionBtn {
+    border: none; border-radius: 16px; padding: 18px 10px; cursor: pointer;
+    font-size: 22px; font-weight: 900; letter-spacing: .5px; color: #fff; width: 100%;
+    background: #2e8b3a; box-shadow: 0 6px 0 #1e5c26;
+    transition: transform .05s, box-shadow .05s, background .2s;
+  }
+  #actionBtn:active { transform: translateY(3px); box-shadow: 0 3px 0 #1e5c26; }
+  #actionBtn.cashout {
+    background: linear-gradient(180deg, #ffb300, #f08c00);
+    box-shadow: 0 6px 0 #9c5a00, 0 0 32px rgba(255, 179, 0, .55);
+    color: #231600; animation: pulse 0.8s infinite alternate;
+  }
+  #actionBtn.cashout:active { box-shadow: 0 3px 0 #9c5a00; }
+  @keyframes pulse { from { filter: brightness(1); } to { filter: brightness(1.14); } }
+  #actionBtn:disabled { background: #3a4066; box-shadow: 0 6px 0 #262b47; color: #9aa3c7; cursor: default; animation: none; }
+  #actionBtn .sub { display: block; font-size: 14px; font-weight: 700; opacity: .9; margin-top: 2px; }
+  #msg { min-height: 20px; text-align: center; font-size: 14px; color: #ffb3ae; font-weight: 600; }
+
+  /* ---------- feed ---------- */
+  #feedWrap { padding: 0 12px 8px; }
+  #feedWrap h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #7c86b8; margin: 6px 0 8px; }
+  #feed { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  #feed li {
+    background: #10142e; border: 1px solid #232a4d; border-radius: 10px;
+    padding: 8px 12px; font-size: 14px; display: flex; justify-content: space-between; gap: 8px;
+  }
+  #feed li .r { font-weight: 700; white-space: nowrap; }
+  #feed li.win .r { color: #7be495; }
+  #feed li.crash { color: #ff8d85; }
+  #feed li.bet .r { color: #cdd6ff; }
+
+  footer {
+    margin-top: auto; text-align: center; padding: 14px 10px 20px;
+    color: #5f6aa0; font-size: 12.5px; line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SKY<span>CRASH</span> ✈️</div>
+  <select id="playerSelect"><option value="">— pick your name —</option></select>
+  <div class="balance">⭐ <b id="balanceVal">0</b> pts</div>
+</header>
+
+<div id="history"><span class="empty">No flights yet — history will appear here</span></div>
+
+<div id="stage">
+  <canvas id="sky"></canvas>
+  <div id="multiplier">1.00x</div>
+  <div id="phaseLabel">Connecting…</div>
+  <div id="countdownWrap"><div id="countdownBar"></div></div>
+</div>
+
+<div id="controls">
+  <div class="betRow">
+    <input id="betAmount" type="number" inputmode="numeric" min="1" step="1" value="50">
+  </div>
+  <div class="chips">
+    <button class="chip" data-amt="10">10</button>
+    <button class="chip" data-amt="50">50</button>
+    <button class="chip" data-amt="100">100</button>
+    <button class="chip" data-amt="500">500</button>
+  </div>
+  <button id="actionBtn" disabled>Pick your name to play</button>
+  <div id="msg"></div>
+</div>
+
+<div id="feedWrap">
+  <h3>Live action</h3>
+  <ul id="feed"></ul>
+</div>
+
+<footer>
+  🎉 Fun points only — no real money, just bragging rights.<br>
+  New player? Ask the boss (admin) to create your name and load your points.
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var GROWTH = 0.13; // must match the server
+
+  var canvas = document.getElementById('sky');
+  var ctx = canvas.getContext('2d');
+  var multEl = document.getElementById('multiplier');
+  var phaseEl = document.getElementById('phaseLabel');
+  var historyEl = document.getElementById('history');
+  var feedEl = document.getElementById('feed');
+  var selectEl = document.getElementById('playerSelect');
+  var balanceEl = document.getElementById('balanceVal');
+  var amountEl = document.getElementById('betAmount');
+  var actionBtn = document.getElementById('actionBtn');
+  var msgEl = document.getElementById('msg');
+  var cdWrap = document.getElementById('countdownWrap');
+  var cdBar = document.getElementById('countdownBar');
+
+  var myId = Number(localStorage.getItem('skycrashPlayerId') || 0) || null;
+  var state = null;
+  var displayMult = 1.0;
+  var lastFrameAt = performance.now();
+  var samples = [];           // {t (sec), m} for the trail
+  var flightStartPerf = null; // performance.now() when flight began (local estimate)
+  var flyawayUntil = 0;       // crash animation deadline
+  var busy = false;
+
+  /* ---------------- canvas sizing ---------------- */
+  function resize() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  /* ---------------- helpers ---------------- */
+  function fmt(n) { return Number(n).toLocaleString('en-US'); }
+  function myPlayer() {
+    if (!state || !myId) return null;
+    for (var i = 0; i < state.players.length; i++) {
+      if (state.players[i].id === myId) return state.players[i];
+    }
+    return null;
+  }
+  function myBet() {
+    if (!state || !myId) return null;
+    for (var i = 0; i < state.bets.length; i++) {
+      if (state.bets[i].playerId === myId) return state.bets[i];
+    }
+    return null;
+  }
+  function showMsg(t) { msgEl.textContent = t || ''; }
+
+  /* Map a flight sample to canvas coords (saturating curves keep the plane in view). */
+  function mapPoint(W, H, s) {
+    var ox = W * 0.06, oy = H * 0.86;
+    var x = ox + (W * 0.86) * (1 - Math.exp(-s.t / 11));
+    var y = oy - (H * 0.74) * (1 - Math.exp(-(s.m - 1) / 5.5));
+    return { x: x, y: y };
+  }
+
+  function drawPlane(x, y, angle, scale) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.scale(scale, scale);
+    // fuselage
+    ctx.fillStyle = '#e63329';
+    ctx.beginPath();
+    ctx.moveTo(-16, 0);
+    ctx.quadraticCurveTo(-14, -6, 4, -6);
+    ctx.quadraticCurveTo(16, -5, 20, 0);
+    ctx.quadraticCurveTo(16, 5, 4, 6);
+    ctx.quadraticCurveTo(-14, 6, -16, 0);
+    ctx.fill();
+    // tail fin
+    ctx.beginPath();
+    ctx.moveTo(-14, -2); ctx.lineTo(-20, -11); ctx.lineTo(-11, -11); ctx.lineTo(-9, -2);
+    ctx.closePath(); ctx.fill();
+    // wing
+    ctx.fillStyle = '#b71f16';
+    ctx.beginPath();
+    ctx.moveTo(-2, 2); ctx.lineTo(-9, 13); ctx.lineTo(1, 13); ctx.lineTo(6, 2);
+    ctx.closePath(); ctx.fill();
+    // cockpit
+    ctx.fillStyle = '#bfe6ff';
+    ctx.beginPath(); ctx.ellipse(7, -4, 5, 3, 0, 0, Math.PI * 2); ctx.fill();
+    // propeller
+    ctx.strokeStyle = '#e8ecff'; ctx.lineWidth = 2;
+    var p = (performance.now() / 40) % (Math.PI * 2);
+    ctx.beginPath();
+    ctx.moveTo(21, -7 * Math.cos(p)); ctx.lineTo(21, 7 * Math.cos(p));
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw() {
+    var W = canvas.clientWidth, H = canvas.clientHeight;
+    // sky
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0a1030');
+    g.addColorStop(0.65, '#131c48');
+    g.addColorStop(1, '#1d1440');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    // stars (fixed pseudo-random field)
+    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    for (var i = 0; i < 46; i++) {
+      var sx = ((i * 173) % 997) / 997 * W;
+      var sy = ((i * 289) % 991) / 991 * H * 0.62;
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    // moon
+    ctx.fillStyle = '#f4f1de';
+    ctx.beginPath(); ctx.arc(W * 0.86, H * 0.16, 17, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#131c48';
+    ctx.beginPath(); ctx.arc(W * 0.86 + 8, H * 0.16 - 5, 14, 0, Math.PI * 2); ctx.fill();
+    // ground + runway
+    ctx.fillStyle = '#0b3d24';
+    ctx.fillRect(0, H * 0.9, W, H * 0.1);
+    ctx.fillStyle = '#2b2f3a';
+    ctx.fillRect(0, H * 0.9, W * 0.42, H * 0.045);
+    ctx.fillStyle = '#ffc531';
+    for (var rx = 6; rx < W * 0.42; rx += 26) ctx.fillRect(rx, H * 0.9 + H * 0.02, 13, 3);
+
+    var phase = state ? state.phase : null;
+    var now = performance.now();
+
+    if (phase === 'betting' || !state) {
+      drawPlane(W * 0.16, H * 0.855, 0, 1.15);
+    } else if (phase === 'flying' || (phase === 'crashed' && now < flyawayUntil)) {
+      // trail
+      if (samples.length > 1) {
+        ctx.strokeStyle = '#ff5147';
+        ctx.lineWidth = 3.5;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        for (var j = 0; j < samples.length; j++) {
+          var p = mapPoint(W, H, samples[j]);
+          if (j === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+      }
+      var last = samples[samples.length - 1];
+      if (last) {
+        var lp = mapPoint(W, H, last);
+        var ang = -0.45;
+        if (samples.length > 2) {
+          var prev = mapPoint(W, H, samples[samples.length - 3]);
+          ang = Math.atan2(lp.y - prev.y, lp.x - prev.x);
+        }
+        if (phase === 'crashed') {
+          // fly-away: plane keeps going up-right and shrinks
+          var k = Math.max(0, (flyawayUntil - now) / 900);
+          lp = { x: lp.x + (1 - k) * W * 0.35, y: lp.y - (1 - k) * H * 0.3 };
+          drawPlane(lp.x, lp.y, -0.6, 0.5 + k * 0.7);
+        } else {
+          drawPlane(lp.x, lp.y, ang, 1.15);
+        }
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function frame(now) {
+    // local multiplier interpolation between polls
+    if (state && state.phase === 'flying' && flightStartPerf) {
+      var elapsed = (now - flightStartPerf) / 1000;
+      var local = Math.exp(GROWTH * elapsed);
+      displayMult = Math.max(state.multiplier, Math.floor(local * 100) / 100);
+      samples.push({ t: elapsed, m: displayMult });
+      if (samples.length > 900) samples.shift();
+    }
+    draw();
+  }
+
+  /* ---------------- rendering from state ---------------- */
+  function render() {
+    if (!state) return;
+
+    // player dropdown (preserve selection)
+    var current = selectEl.value;
+    var html = '<option value="">— pick your name —</option>';
+    state.players.forEach(function (p) {
+      html += '<option value="' + p.id + '"' + (p.id === myId ? ' selected' : '') + '>' +
+        p.name.replace(/</g, '&lt;') + ' — ' + fmt(p.points) + ' pts</option>';
+    });
+    if (selectEl.innerHTML !== html) selectEl.innerHTML = html;
+    if (current && Number(current) !== myId) selectEl.value = current;
+
+    var me = myPlayer();
+    balanceEl.textContent = me ? fmt(me.points) : '0';
+
+    // history pills
+    if (state.history.length) {
+      historyEl.innerHTML = state.history.map(function (c) {
+        var cls = 'pill';
+        if (c >= 10) cls = 'pill big';       // gold: huge flight
+        else if (c < 1.5) cls = 'pill hot';  // red: busted early
+        return '<span class="' + cls + '">' + c.toFixed(2) + 'x</span>';
+      }).join('');
+    }
+
+    // multiplier + phase label
+    var bet = myBet();
+    if (state.phase === 'betting') {
+      displayMult = 1.0;
+      multEl.textContent = '1.00x';
+      multEl.classList.remove('crashed');
+      phaseEl.textContent = '✈️ Next flight in ' + Math.ceil(state.endsInMs / 1000) + 's — place your bet!';
+      cdWrap.style.display = 'block';
+      cdBar.style.width = Math.min(100, (state.endsInMs / 6000) * 100) + '%';
+    } else if (state.phase === 'flying') {
+      if (!flightStartPerf) {
+        flightStartPerf = performance.now() - (Math.log(Math.max(1, state.multiplier)) / GROWTH) * 1000;
+        samples = [];
+      }
+      multEl.textContent = displayMult.toFixed(2) + 'x';
+      multEl.classList.remove('crashed');
+      phaseEl.textContent = bet && bet.cashedAt === null ? '🚀 Flying! Cash out before it\'s gone!' : '🚀 Flying…';
+      cdWrap.style.display = 'none';
+    } else if (state.phase === 'crashed') {
+      multEl.textContent = state.crashPoint.toFixed(2) + 'x';
+      multEl.classList.add('crashed');
+      phaseEl.textContent = '💥 Flew away at ' + state.crashPoint.toFixed(2) + 'x!';
+      cdWrap.style.display = 'none';
+    }
+
+    // action button
+    actionBtn.className = '';
+    if (!myId || !me) {
+      actionBtn.disabled = true;
+      actionBtn.textContent = state.players.length ? '👆 Pick your name to play' : 'Ask the admin to create players';
+    } else if (state.phase === 'betting') {
+      if (bet) {
+        actionBtn.disabled = true;
+        actionBtn.innerHTML = '✅ Bet placed: ' + fmt(bet.amount) + ' pts<span class="sub">Get ready for take-off…</span>';
+      } else {
+        actionBtn.disabled = busy;
+        actionBtn.innerHTML = '🎯 PLACE BET<span class="sub">Round #' + state.roundId + '</span>';
+      }
+    } else if (state.phase === 'flying') {
+      if (bet && bet.cashedAt === null) {
+        actionBtn.disabled = busy;
+        actionBtn.className = 'cashout';
+        var payout = Math.floor(bet.amount * displayMult);
+        actionBtn.innerHTML = '💰 CASH OUT<span class="sub">Win ' + fmt(payout) + ' pts @ ' + displayMult.toFixed(2) + 'x</span>';
+      } else if (bet && bet.cashedAt !== null) {
+        actionBtn.disabled = true;
+        actionBtn.innerHTML = '✅ Cashed out ' + fmt(bet.payout) + ' pts<span class="sub">@ ' + bet.cashedAt.toFixed(2) + 'x — watch it fly!</span>';
+      } else {
+        actionBtn.disabled = true;
+        actionBtn.textContent = '✈️ Flight in progress…';
+      }
+    } else { // crashed
+      if (bet && bet.cashedAt === null) {
+        actionBtn.disabled = true;
+        actionBtn.innerHTML = '💥 Crashed — bet lost<span class="sub">Next flight coming up…</span>';
+      } else if (bet) {
+        actionBtn.disabled = true;
+        actionBtn.innerHTML = '✅ You won ' + fmt(bet.payout) + ' pts<span class="sub">Next flight coming up…</span>';
+      } else {
+        actionBtn.disabled = true;
+        actionBtn.textContent = 'Next flight coming up…';
+      }
+    }
+
+    // feed
+    feedEl.innerHTML = state.feed.map(function (f) {
+      var name = String(f.name || '').replace(/</g, '&lt;');
+      if (f.type === 'bet') {
+        return '<li class="bet"><span>🎯 <b>' + name + '</b> bet ' + fmt(f.amount) + ' pts</span><span class="r">Round #' + f.roundId + '</span></li>';
+      }
+      if (f.type === 'cashout') {
+        return '<li class="win"><span>💰 <b>' + name + '</b> cashed out</span><span class="r">+' + fmt(f.payout) + ' pts @ ' + Number(f.mult).toFixed(2) + 'x</span></li>';
+      }
+      if (f.type === 'crash') {
+        return '<li class="crash"><span>💥 Flight #' + f.roundId + ' flew away</span><span class="r">' + Number(f.crashPoint).toFixed(2) + 'x</span></li>';
+      }
+      return '';
+    }).join('');
+  }
+
+  /* ---------------- polling ---------------- */
+  var prevPhase = null;
+  function poll() {
+    fetch('/api/state')
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        state = s;
+        if (s.phase === 'crashed' && prevPhase === 'flying') {
+          flyawayUntil = performance.now() + 900;
+        }
+        if (s.phase !== 'flying') {
+          flightStartPerf = null;
+          if (s.phase === 'betting') samples = [];
+        }
+        prevPhase = s.phase;
+        render();
+      })
+      .catch(function () { phaseEl.textContent = '📡 Reconnecting…'; });
+  }
+  setInterval(poll, 300);
+  poll();
+  requestAnimationFrame(frame);
+
+  /* ---------------- events ---------------- */
+  selectEl.addEventListener('change', function () {
+    myId = Number(selectEl.value) || null;
+    if (myId) localStorage.setItem('skycrashPlayerId', String(myId));
+    else localStorage.removeItem('skycrashPlayerId');
+    render();
+  });
+
+  document.querySelectorAll('.chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      amountEl.value = chip.getAttribute('data-amt');
+    });
+  });
+
+  actionBtn.addEventListener('click', function () {
+    if (!state || !myId || busy) return;
+    var bet = myBet();
+    busy = true;
+    if (state.phase === 'betting' && !bet) {
+      var amount = parseInt(amountEl.value, 10);
+      fetch('/api/bet', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: myId, amount: amount })
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          busy = false;
+          if (!res.ok) showMsg('⚠️ ' + (res.j.error || 'Bet failed'));
+          else { showMsg(''); poll(); }
+        })
+        .catch(function () { busy = false; showMsg('⚠️ Connection problem — try again'); });
+    } else if (state.phase === 'flying' && bet && bet.cashedAt === null) {
+      fetch('/api/cashout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: myId })
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          busy = false;
+          if (!res.ok) showMsg('⚠️ ' + (res.j.error || 'Cash out failed'));
+          else { showMsg(''); poll(); }
+        })
+        .catch(function () { busy = false; showMsg('⚠️ Connection problem — try again'); });
+    } else {
+      busy = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>
