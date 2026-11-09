@@ -74,6 +74,8 @@
   <input id="newName" type="text" maxlength="24" placeholder="e.g. Ali">
   <label for="newPoints">Starting fun points</label>
   <input id="newPoints" type="number" inputmode="numeric" min="0" step="1" value="1000">
+  <label for="newPass">Login password for this player (give it to them)</label>
+  <input id="newPass" type="text" minlength="4" placeholder="e.g. ali1234">
   <div class="row" style="margin-top:12px;">
     <button id="createBtn" style="flex:1;">Create player</button>
   </div>
@@ -164,6 +166,10 @@
           '<button class="grey" data-act="removeCustom">Remove</button>' +
           '<button class="red" data-act="del">🗑 Delete</button>' +
         '</div>' +
+        '<div class="custom">' +
+          '<input type="text" placeholder="New login password" class="newPassInput">' +
+          '<button class="blue" data-act="setpass">Set password</button>' +
+        '</div>' +
       '</div>';
     }).join('');
   }
@@ -206,12 +212,15 @@
   document.getElementById('createBtn').addEventListener('click', function () {
     var name = document.getElementById('newName').value.trim();
     var points = parseInt(document.getElementById('newPoints').value, 10);
+    var pass = document.getElementById('newPass').value;
     if (!name) { showMsg('Give the player a name first.', false); return; }
-    api('/api/admin/players', { name: name, startingPoints: isNaN(points) ? 1000 : points })
+    if (!pass || pass.length < 4) { showMsg('Give the player a login password (at least 4 characters).', false); return; }
+    api('/api/admin/players', { name: name, startingPoints: isNaN(points) ? 1000 : points, password: pass })
       .then(function (res) {
         if (!res.ok) { showMsg('⚠️ ' + (res.j.error || 'Could not create player'), false); return; }
         document.getElementById('newName').value = '';
-        showMsg('✅ Player "' + res.j.player.name + '" created with ' + fmt(res.j.player.points) + ' pts.', true);
+        document.getElementById('newPass').value = '';
+        showMsg('✅ Player "' + res.j.player.name + '" created with ' + fmt(res.j.player.points) + ' pts. Give them their name + password to log in.', true);
         loadPlayers();
       })
       .catch(function () { showMsg('⚠️ Connection problem', false); });
@@ -246,7 +255,16 @@
     var playerId = Number(wrap.getAttribute('data-id'));
     var act = btn.getAttribute('data-act');
 
-    if (act === 'removeCustom') {
+    if (act === 'setpass') {
+      var newPass = wrap.querySelector('.newPassInput').value;
+      if (!newPass || newPass.length < 4) { showMsg('Type a new password first (at least 4 characters).', false); return; }
+      api('/api/admin/setpassword', { playerId: playerId, password: newPass })
+        .then(function (res) {
+          if (!res.ok) { showMsg('⚠️ ' + (res.j.error || 'Failed'), false); return; }
+          showMsg('✅ Password changed for ' + res.j.player.name + '. They are logged out everywhere — give them the new password.', true);
+          loadPlayers();
+        });
+    } else if (act === 'removeCustom') {
       var amt = parseInt(wrap.querySelector('.customAmt').value, 10);
       if (!amt || amt <= 0) { showMsg('Type an amount first.', false); return; }
       api('/api/admin/remove', { playerId: playerId, amount: amt })
