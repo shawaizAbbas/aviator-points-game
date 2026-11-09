@@ -313,6 +313,7 @@ function publicState() {
     phase: game.phase,
     roundId: game.roundId,
     multiplier: game.currentMultiplier,
+    flightStartedAt: game.flightStartedAt,
     endsInMs: Math.max(0, game.phaseEndsAt - Date.now()),
     crashPoint: game.phase === 'crashed' ? game.crashPoint : null,
     history: game.history,
