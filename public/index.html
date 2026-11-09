@@ -487,15 +487,21 @@
 
   var prevPhase = null;
   function poll() {
+    var sentToken = myToken; // remember which session this request carries
     fetch('/api/state', { headers: authHeaders() })
       .then(function (r) { return r.json(); })
       .then(function (s) {
         state = s;
-        myId = s.me ? s.me.id : null;
-        if (myToken && !s.me) {
-          // session expired, password changed, or account deleted
-          myToken = null;
-          localStorage.removeItem('skycrashToken');
+        // Ignore login state from a stale request (sent before the current
+        // login) — its "me: null" must not wipe a fresh login.
+        if (sentToken === myToken) {
+          myId = s.me ? s.me.id : null;
+          if (sentToken && !s.me) {
+            // the session this request used is gone (expired / password changed / deleted)
+            myToken = null;
+            myId = null;
+            localStorage.removeItem('skycrashToken');
+          }
         }
         if (s.phase === 'crashed' && prevPhase === 'flying') {
           flyawayUntil = performance.now() + 900;
