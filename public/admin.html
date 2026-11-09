@@ -127,7 +127,7 @@
     msgEl.className = ok === true ? 'ok' : (ok === false ? 'err' : '');
   }
   function fmt(n) { return Number(n).toLocaleString('en-US'); }
-  function esc(s) { return String(s).replace(/</g, '&lt;'); }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
   function api(path, body) {
     var opts = { headers: { 'Content-Type': 'application/json', 'X-Admin-Pin': pin } };
