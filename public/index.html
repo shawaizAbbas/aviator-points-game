@@ -116,18 +116,27 @@
   #actionBtn .sub { display: block; font-size: 14px; font-weight: 700; opacity: .9; margin-top: 2px; }
   #msg { min-height: 20px; text-align: center; font-size: 14px; color: #ffb3ae; font-weight: 600; }
 
-  /* ---------- feed ---------- */
-  #feedWrap { padding: 0 12px 8px; }
-  #feedWrap h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #7c86b8; margin: 6px 0 8px; }
-  #feed { list-style: none; display: flex; flex-direction: column; gap: 6px; }
-  #feed li {
+  /* ---------- crowd (other players) ---------- */
+  #crowdWrap { padding: 0 12px 8px; }
+  #crowdWrap h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #7c86b8; margin: 6px 0 8px; display: flex; justify-content: space-between; }
+  #crowdWrap h3 .cnt { color: #cdd6ff; }
+  #crowd { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  #crowd li {
     background: #10142e; border: 1px solid #232a4d; border-radius: 10px;
     padding: 8px 12px; font-size: 14px; display: flex; justify-content: space-between; gap: 8px;
   }
-  #feed li .r { font-weight: 700; white-space: nowrap; }
-  #feed li.win .r { color: #7be495; }
-  #feed li.crash { color: #ff8d85; }
-  #feed li.bet .r { color: #cdd6ff; }
+  #crowd li .who { display: flex; gap: 8px; align-items: center; min-width: 0; }
+  #crowd li .av {
+    width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; color: #0b0e24; background: #ffc531;
+  }
+  #crowd li .st { font-weight: 700; white-space: nowrap; }
+  #crowd li.waiting .st { color: #9aa3c7; }
+  #crowd li.flying .st { color: #cdd6ff; }
+  #crowd li.won .st { color: #7be495; }
+  #crowd li.lost { opacity: .45; }
+  #crowd li.lost .st { color: #8a5170; }
 
   footer {
     margin-top: auto; text-align: center; padding: 14px 10px 20px;
@@ -176,9 +185,9 @@
   <div id="msg"></div>
 </div>
 
-<div id="feedWrap">
-  <h3>Live action</h3>
-  <ul id="feed"></ul>
+<div id="crowdWrap">
+  <h3><span>👥 Players in this flight</span><span class="cnt" id="crowdCount"></span></h3>
+  <ul id="crowd"></ul>
 </div>
 
 <footer>
@@ -197,7 +206,8 @@
   var multEl = document.getElementById('multiplier');
   var phaseEl = document.getElementById('phaseLabel');
   var historyEl = document.getElementById('history');
-  var feedEl = document.getElementById('feed');
+  var crowdEl = document.getElementById('crowd');
+  var crowdCountEl = document.getElementById('crowdCount');
   var loginFormEl = document.getElementById('loginForm');
   var loggedInBoxEl = document.getElementById('loggedInBox');
   var loginNameEl = document.getElementById('loginName');
@@ -215,10 +225,21 @@
   var state = null;
   var displayMult = 1.0;
   var lastFrameAt = performance.now();
-  var samples = [];           // {t (sec), m} for the trail
-  var flightStartPerf = null; // performance.now() when flight began (local estimate)
+  var clockOffset = null;     // best (smallest) Date.now() - serverNow seen
   var flyawayUntil = 0;       // crash animation deadline
   var busy = false;
+  var pollInFlight = false;
+  var lastFakeTick = 0;
+
+  function serverNowEst() {
+    return clockOffset === null ? Date.now() : Date.now() - clockOffset;
+  }
+  // Seconds since take-off, from the SERVER's clock — this is what makes the
+  // multiplier and the plane glide smoothly even when polls arrive late.
+  function flightElapsed() {
+    if (!state || !state.flightStartedAt) return null;
+    return Math.max(0, (serverNowEst() - state.flightStartedAt) / 1000);
+  }
 
   /* ---------------- canvas sizing ---------------- */
   function resize() {
@@ -327,47 +348,63 @@
     if (phase === 'betting' || !state) {
       drawPlane(W * 0.16, H * 0.855, 0, 1.15);
     } else if (phase === 'flying' || (phase === 'crashed' && now < flyawayUntil)) {
-      // trail
-      if (samples.length > 1) {
+      // smooth parametric trail, computed fresh every frame from the server clock
+      var endT, endM;
+      if (phase === 'crashed') {
+        endM = state.crashPoint;
+        endT = Math.log(Math.max(1, endM)) / GROWTH;
+      } else {
+        var elNow = flightElapsed();
+        if (elNow === null) { endT = 0; endM = state.multiplier || 1; endT = Math.log(Math.max(1, endM)) / GROWTH; }
+        else { endT = elNow; endM = Math.exp(GROWTH * elNow); }
+      }
+      if (endT > 0.03) {
+        var N = 44;
         ctx.strokeStyle = '#ff5147';
         ctx.lineWidth = 3.5;
         ctx.lineJoin = 'round';
         ctx.beginPath();
-        for (var j = 0; j < samples.length; j++) {
-          var p = mapPoint(W, H, samples[j]);
-          if (j === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        for (var j = 0; j <= N; j++) {
+          var tj = endT * j / N;
+          var pj = mapPoint(W, H, { t: tj, m: Math.exp(GROWTH * tj) });
+          if (j === 0) ctx.moveTo(pj.x, pj.y); else ctx.lineTo(pj.x, pj.y);
         }
         ctx.stroke();
       }
-      var last = samples[samples.length - 1];
-      if (last) {
-        var lp = mapPoint(W, H, last);
-        var ang = -0.45;
-        if (samples.length > 2) {
-          var prev = mapPoint(W, H, samples[samples.length - 3]);
-          ang = Math.atan2(lp.y - prev.y, lp.x - prev.x);
-        }
-        if (phase === 'crashed') {
-          // fly-away: plane keeps going up-right and shrinks
-          var k = Math.max(0, (flyawayUntil - now) / 900);
-          lp = { x: lp.x + (1 - k) * W * 0.35, y: lp.y - (1 - k) * H * 0.3 };
-          drawPlane(lp.x, lp.y, -0.6, 0.5 + k * 0.7);
-        } else {
-          drawPlane(lp.x, lp.y, ang, 1.15);
-        }
+      var lp = mapPoint(W, H, { t: endT, m: endM });
+      var tBack = Math.max(0, endT - 0.18);
+      var pBack = mapPoint(W, H, { t: tBack, m: Math.exp(GROWTH * tBack) });
+      var ang = Math.atan2(lp.y - pBack.y, lp.x - pBack.x);
+      if (phase === 'crashed') {
+        // fly-away: plane keeps going up-right and shrinks
+        var k = Math.max(0, (flyawayUntil - now) / 900);
+        lp = { x: lp.x + (1 - k) * W * 0.35, y: lp.y - (1 - k) * H * 0.3 };
+        drawPlane(lp.x, lp.y, -0.6, 0.5 + k * 0.7);
+      } else {
+        drawPlane(lp.x, lp.y, ang, 1.15);
       }
     }
     requestAnimationFrame(frame);
   }
 
   function frame(now) {
-    // local multiplier interpolation between polls
-    if (state && state.phase === 'flying' && flightStartPerf) {
-      var elapsed = (now - flightStartPerf) / 1000;
-      var local = Math.exp(GROWTH * elapsed);
-      displayMult = Math.max(state.multiplier, Math.floor(local * 100) / 100);
-      samples.push({ t: elapsed, m: displayMult });
-      if (samples.length > 900) samples.shift();
+    // multiplier from the server's flight clock — glides at 60fps between polls
+    if (state && state.phase === 'flying') {
+      var el = flightElapsed();
+      if (el !== null) {
+        displayMult = Math.max(1, Math.floor(Math.exp(GROWTH * el) * 100) / 100);
+      } else {
+        displayMult = state.multiplier;
+      }
+      // keep the big number + cash-out value live while flying
+      multEl.textContent = displayMult.toFixed(2) + 'x';
+      var b = myBet();
+      if (b && b.cashedAt === null && actionBtn.className === 'cashout') {
+        var payout = Math.floor(b.amount * displayMult);
+        actionBtn.innerHTML = '💰 CASH OUT<span class="sub">Win ' + fmt(payout) + ' pts @ ' + displayMult.toFixed(2) + 'x</span>';
+      }
+      // the crowd cashes out as the multiplier passes their targets
+      if (now - lastFakeTick > 200) { lastFakeTick = now; fakeSync(); }
     }
     draw();
   }
@@ -408,10 +445,6 @@
       cdWrap.style.display = 'block';
       cdBar.style.width = Math.min(100, (state.endsInMs / 6000) * 100) + '%';
     } else if (state.phase === 'flying') {
-      if (!flightStartPerf) {
-        flightStartPerf = performance.now() - (Math.log(Math.max(1, state.multiplier)) / GROWTH) * 1000;
-        samples = [];
-      }
       multEl.textContent = displayMult.toFixed(2) + 'x';
       multEl.classList.remove('crashed');
       phaseEl.textContent = bet && bet.cashedAt === null ? '🚀 Flying! Cash out before it\'s gone!' : '🚀 Flying…';
@@ -462,19 +495,86 @@
       }
     }
 
-    // feed
-    feedEl.innerHTML = state.feed.map(function (f) {
-      var name = String(f.name || '').replace(/</g, '&lt;');
-      if (f.type === 'bet') {
-        return '<li class="bet"><span>🎯 <b>' + name + '</b> bet ' + fmt(f.amount) + ' pts</span><span class="r">Round #' + f.roundId + '</span></li>';
+  }
+
+  /* ---------------- crowd: fellow players at the table ----------------
+     A lively Aviator-style board of other players betting and cashing out
+     alongside you. Simulated on this device for atmosphere. */
+  var FAKE_NAMES = ['Alex', 'Maria', 'Andreas', 'Giorgos', 'Elena', 'Nikos', 'Sara', 'Omar', 'Layla', 'Dimitris',
+    'Anna', 'Petros', 'Kostas', 'Ahmad', 'Yusuf', 'Christina', 'Michalis', 'Fatima', 'Stelios', 'Ioanna',
+    'Hassan', 'Vasilis', 'Despina', 'Karim', 'Nadia', 'Pavlos', 'Rania', 'Spiros', 'Tariq', 'Lefteris'];
+  var AV_COLORS = ['#ffc531', '#7be495', '#6fc3ff', '#ff9de2', '#c5a3ff', '#ffb27b', '#8ef0d2', '#ffd97b'];
+  var fakeBets = [];
+  var lastCrowdPhase = null;
+
+  function escFake(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function fakeTarget() {
+    var r = Math.random();
+    if (r < 0.30) return 1.15 + Math.random() * 0.7;  // nervous: out early
+    if (r < 0.62) return 1.9 + Math.random() * 1.1;   // classic ~2x
+    if (r < 0.85) return 3 + Math.random() * 3;       // greedy
+    return 6 + Math.random() * 14;                    // moon chasers
+  }
+  function fakeAmount() {
+    var tiers = [10, 20, 25, 50, 50, 50, 100, 100, 150, 200, 250, 300, 500, 750, 1000];
+    return tiers[Math.floor(Math.random() * tiers.length)];
+  }
+  function fakeNewRound(roundId) {
+    var n = 9 + Math.floor(Math.random() * 8); // 9–16 players
+    var pool = FAKE_NAMES.slice();
+    fakeBets = [];
+    for (var i = 0; i < n; i++) {
+      var nm = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+      fakeBets.push({
+        name: nm,
+        color: AV_COLORS[Math.floor(Math.random() * AV_COLORS.length)],
+        amount: fakeAmount(),
+        target: fakeTarget(),
+        cashedAt: null,
+        payout: 0
+      });
+    }
+    lastCrowdPhase = null;
+    renderCrowd();
+  }
+  function fakeSync() {
+    if (!state) return;
+    var changed = state.phase !== lastCrowdPhase;
+    lastCrowdPhase = state.phase;
+    if (state.phase === 'flying') {
+      for (var i = 0; i < fakeBets.length; i++) {
+        var b = fakeBets[i];
+        if (b.cashedAt === null && displayMult >= b.target) {
+          b.cashedAt = b.target;
+          b.payout = Math.floor(b.amount * b.target);
+          changed = true;
+        }
       }
-      if (f.type === 'cashout') {
-        return '<li class="win"><span>💰 <b>' + name + '</b> cashed out</span><span class="r">+' + fmt(f.payout) + ' pts @ ' + Number(f.mult).toFixed(2) + 'x</span></li>';
+    }
+    if (changed) renderCrowd();
+  }
+  function renderCrowd() {
+    if (!state) { crowdEl.innerHTML = ''; crowdCountEl.textContent = ''; return; }
+    var phase = state.phase;
+    var rows = fakeBets.slice().sort(function (a, b) {
+      return (a.cashedAt !== null ? 0 : 1) - (b.cashedAt !== null ? 0 : 1);
+    });
+    crowdCountEl.textContent = fakeBets.length + ' bets';
+    crowdEl.innerHTML = rows.map(function (b) {
+      var who = '<span class="who"><span class="av" style="background:' + b.color + '">' +
+        escFake(b.name.charAt(0)) + '</span><b>' + escFake(b.name) + '</b></span>';
+      if (phase === 'betting') {
+        return '<li class="waiting">' + who + '<span class="st">bet ' + fmt(b.amount) + ' pts</span></li>';
       }
-      if (f.type === 'crash') {
-        return '<li class="crash"><span>💥 Flight #' + f.roundId + ' flew away</span><span class="r">' + Number(f.crashPoint).toFixed(2) + 'x</span></li>';
+      if (b.cashedAt !== null) {
+        return '<li class="won">' + who + '<span class="st">💰 +' + fmt(b.payout) + ' @ ' + b.cashedAt.toFixed(2) + 'x</span></li>';
       }
-      return '';
+      if (phase === 'crashed') {
+        return '<li class="lost">' + who + '<span class="st">lost ' + fmt(b.amount) + '</span></li>';
+      }
+      return '<li class="flying">' + who + '<span class="st">🎯 ' + fmt(b.amount) + ' pts…</span></li>';
     }).join('');
   }
 
@@ -486,11 +586,18 @@
   }
 
   var prevPhase = null;
+  var prevRoundId = null;
   function poll() {
+    if (pollInFlight) return; // never stack polls — stacking causes the lag
+    pollInFlight = true;
     var sentToken = myToken; // remember which session this request carries
     fetch('/api/state', { headers: authHeaders() })
       .then(function (r) { return r.json(); })
       .then(function (s) {
+        pollInFlight = false;
+        // track the server clock (smallest offset = cleanest sample)
+        var off = Date.now() - s.serverNow;
+        if (clockOffset === null || off < clockOffset) clockOffset = off;
         state = s;
         // Ignore login state from a stale request (sent before the current
         // login) — its "me: null" must not wipe a fresh login.
@@ -501,23 +608,33 @@
             myToken = null;
             myId = null;
             localStorage.removeItem('skycrashToken');
+            localStorage.removeItem('skycrashName');
           }
         }
         if (s.phase === 'crashed' && prevPhase === 'flying') {
           flyawayUntil = performance.now() + 900;
         }
-        if (s.phase !== 'flying') {
-          flightStartPerf = null;
-          if (s.phase === 'betting') samples = [];
+        // fake crowd follows the real rounds
+        if (s.roundId !== prevRoundId) {
+          prevRoundId = s.roundId;
+          fakeNewRound(s.roundId);
         }
+        fakeSync();
         prevPhase = s.phase;
         render();
       })
-      .catch(function () { phaseEl.textContent = '📡 Reconnecting…'; });
+      .catch(function () { pollInFlight = false; phaseEl.textContent = '📡 Reconnecting…'; });
   }
   setInterval(poll, 300);
+  // Saved login? Show the account box immediately — no login-form flash.
+  if (myToken) {
+    loginFormEl.classList.add('hidden');
+    loggedInBoxEl.classList.remove('hidden');
+    whoAmIEl.textContent = '👤 ' + (localStorage.getItem('skycrashName') || '…');
+  }
   poll();
   requestAnimationFrame(frame);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
 
   /* ---------------- events ---------------- */
   document.getElementById('loginBtn').addEventListener('click', function () {
@@ -532,6 +649,7 @@
         if (!res.ok) { showMsg('⚠️ ' + (res.j.error || 'Login failed')); return; }
         myToken = res.j.token;
         localStorage.setItem('skycrashToken', myToken);
+        localStorage.setItem('skycrashName', res.j.player.name);
         loginPassEl.value = '';
         showMsg('✅ Welcome, ' + res.j.player.name + '!');
         poll();
@@ -546,6 +664,7 @@
         myToken = null;
         myId = null;
         localStorage.removeItem('skycrashToken');
+        localStorage.removeItem('skycrashName');
         showMsg('👋 Logged out.');
         poll();
       });
