@@ -1,0 +1,1 @@
+{"dependencies":{"express":"^4.19.2"},"description":"Aviator-style crash game with fun points only. Server-authoritative rounds, admin-controlled players and points.","engines":{"node":">=18"},"main":"server.js","name":"aviator-points-game","scripts":{"start":"node server.js"},"version":"1.0.0"}
